@@ -6,6 +6,13 @@ const fs = require('fs');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 
+// Load environment variables
+require('dotenv').config();
+const ENABLE_ENCRYPTION = process.env.ENABLE_ENCRYPTION === 'true';
+
+console.log('🚀 SP Server Configuration:');
+console.log('🔐 Encryption Mode:', ENABLE_ENCRYPTION ? 'ENABLED' : 'DISABLED');
+
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
@@ -18,34 +25,25 @@ saml.setSchemaValidator({
 let idp;
 let idpMetadata;
 
+// Dynamic IdP metadata loading
 async function loadIdpMetadata() {
-    console.log('🔄 Loading IdP metadata from:', IDP_METADATA_URL);
-    const resp = await axios.get(IDP_METADATA_URL);
-    idpMetadata = resp.data;
-    console.log('✅ Loaded IdP metadata (first 500 chars):', idpMetadata.substring(0, 500));
-
-    // Create IdP with metadata that includes signing certificates
-    idp = saml.IdentityProvider({
-        metadata: idpMetadata,
-        // Ensure we want to verify signatures
-        wantAuthnRequestsSigned: false,
-        isAssertionEncrypted: true
-    });
-
-    console.log('✅ IdP entityID:', idp.entityMeta.getEntityID());
-
-    // Check if the IdP has signing certificates
     try {
-        const signingCerts = idp.entityMeta.getX509Certificate('signing');
-        console.log('🔑 IdP signing certificates found:', signingCerts ? signingCerts.length : 0);
-        if (signingCerts && signingCerts.length > 0) {
-            console.log('🔑 First signing cert (100 chars):', signingCerts[0].substring(0, 100));
-        }
+        console.log('🔄 Loading IdP metadata from:', IDP_METADATA_URL);
+        const response = await axios.get(IDP_METADATA_URL);
+        idpMetadata = response.data;
+        console.log('✅ IdP metadata loaded successfully');
 
-        const encryptCerts = idp.entityMeta.getX509Certificate('encrypt');
-        console.log('🔒 IdP encryption certificates found:', encryptCerts ? encryptCerts.length : 0);
-    } catch (err) {
-        console.log('⚠️ Error getting IdP certificates:', err.message);
+        idp = saml.IdentityProvider({
+            metadata: idpMetadata,
+            // Configure encryption settings to match SP configuration
+            isAssertionEncrypted: ENABLE_ENCRYPTION
+        });
+
+        console.log('� IdP configured with encryption:', ENABLE_ENCRYPTION);
+        return true;
+    } catch (error) {
+        console.error('❌ Failed to load IdP metadata:', error.message);
+        return false;
     }
 }
 
@@ -89,10 +87,12 @@ app.post('/assert', async (req, res) => {
         const debugResponse = {
             success: true,
             message: "SAML assertion parsed successfully",
+            encryptionEnabled: ENABLE_ENCRYPTION,
             samlResponseLength: req.body.SAMLResponse?.length || 0,
             relayState: req.body.RelayState,
             nameID: nameID,
             attributes: attributes,
+            attributesCount: Object.keys(attributes).length,
             fullResult: result,
             extractObject: extract,
             resultKeys: Object.keys(result),
@@ -111,6 +111,7 @@ app.post('/assert', async (req, res) => {
         const errorResponse = {
             success: false,
             message: "SAML assertion error",
+            encryptionEnabled: ENABLE_ENCRYPTION,
             error: err?.message || err?.toString() || 'Unknown error',
             samlResponseLength: req.body.SAMLResponse?.length || 0,
             relayState: req.body.RelayState,
