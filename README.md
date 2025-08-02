@@ -5,12 +5,13 @@ A complete SAML Single Sign-On (SSO) implementation using Node.js with encrypted
 ## 🚀 Features
 
 - ✅ **Complete SAML 2.0 SSO Flow** with proper signature verification
-- ✅ **Encrypted Assertions** using AES-256-CBC encryption
+- ✅ **Configurable Encryption** - Enable/disable AES-256-CBC encrypted assertions
 - ✅ **Dynamic Metadata Loading** for real-time configuration synchronization
 - ✅ **Custom User Attributes** (firstName, lastName, age, gender, email, username, displayName)
 - ✅ **Comprehensive Testing Suite** with automated flow verification
 - ✅ **JSON Debug Responses** for easy troubleshooting
 - ✅ **Production-Ready Architecture**
+- ✅ **Environment-Based Configuration** with .env file support
 
 ## 📁 Project Structure
 
@@ -39,7 +40,8 @@ smal-encrypt/
 ├── test-scripts/               # Testing and debugging scripts
 │   ├── complete-saml-test.js   # Comprehensive SAML flow test
 │   ├── debug-saml-post.js      # SAML response debugging
-│   └── decode-saml.js          # SAML response decoder
+│   ├── decode-saml.js          # SAML response decoder
+│   └── test-encryption-modes.js # Test both encrypted/non-encrypted modes
 ├── .gitignore                  # Git ignore rules
 └── README.md                   # This file
 ```
@@ -77,18 +79,39 @@ cp idp-app/.env.sample idp-app/.env
 cp sp-app/.env.sample sp-app/.env
 
 # Edit the .env files according to your setup
+# Key settings:
+# - ENABLE_ENCRYPTION=true/false (controls assertion encryption)
+# - DEBUG_SAML=true/false (enables detailed logging)
 ```
 
-### 3. Generate SAML Certificates
+### 3. Configure Encryption Mode
+
+The system supports both encrypted and non-encrypted SAML assertions:
+
+**For Encrypted Assertions (Recommended for Production):**
+```bash
+# In both idp-app/.env and sp-app/.env
+ENABLE_ENCRYPTION=true
+ASSERTION_ENCRYPTED=true
+```
+
+**For Non-Encrypted Assertions (Development/Testing):**
+```bash
+# In both idp-app/.env and sp-app/.env
+ENABLE_ENCRYPTION=false
+ASSERTION_ENCRYPTED=false
+```
+
+### 4. Generate SAML Certificates
 
 **For IdP (Identity Provider):**
 ```bash
 cd idp-app
 
-# Generate signing key and certificate
+# Generate signing key and certificate (always required)
 openssl req -x509 -newkey rsa:2048 -keyout idp-signing.key -out idp-signing.cert -days 365 -nodes -subj "/CN=IdP Signing"
 
-# Generate encryption key and certificate
+# Generate encryption key and certificate (only needed if ENABLE_ENCRYPTION=true)
 openssl req -x509 -newkey rsa:2048 -keyout idp-encrypt.key -out idp-encrypt.cert -days 365 -nodes -subj "/CN=IdP Encryption"
 
 cd ..
@@ -98,14 +121,16 @@ cd ..
 ```bash
 cd sp-app
 
-# Generate signing key and certificate
+# Generate signing key and certificate (always required)
 openssl req -x509 -newkey rsa:2048 -keyout sp-signing.key -out sp-signing.cert -days 365 -nodes -subj "/CN=SP Signing"
 
-# Generate encryption key and certificate
+# Generate encryption key and certificate (only needed if ENABLE_ENCRYPTION=true)
 openssl req -x509 -newkey rsa:2048 -keyout sp-encrypt.key -out sp-encrypt.cert -days 365 -nodes -subj "/CN=SP Encryption"
 
 cd ..
 ```
+
+> **Note**: Encryption certificates are only required when `ENABLE_ENCRYPTION=true`. For non-encrypted mode, only signing certificates are needed.
 
 ## 🚀 Running the Applications
 
@@ -142,6 +167,9 @@ npx nodemon app.js
 # Run comprehensive SAML flow test
 node complete-saml-test.js
 
+# Test both encryption modes
+node test-encryption-modes.js
+
 # Run specific debugging tests
 node debug-saml-post.js
 node decode-saml.js
@@ -171,6 +199,32 @@ node decode-saml.js
 
 ## 🔧 Configuration
 
+### Encryption Mode Configuration
+
+The system supports both encrypted and non-encrypted SAML assertions through environment variables:
+
+#### Encrypted Mode (Production Recommended)
+```bash
+# .env files for both IdP and SP
+ENABLE_ENCRYPTION=true
+ASSERTION_ENCRYPTED=true
+```
+- ✅ SAML assertions encrypted with AES-256-CBC
+- ✅ Maximum security for sensitive user data
+- ✅ Requires encryption certificates for both IdP and SP
+- ✅ Custom attribute template with tag replacement
+
+#### Non-Encrypted Mode (Development/Testing)
+```bash
+# .env files for both IdP and SP
+ENABLE_ENCRYPTION=false
+ASSERTION_ENCRYPTED=false
+```
+- ✅ SAML assertions sent in plain text (signed but not encrypted)
+- ✅ Easier debugging and development
+- ✅ Only requires signing certificates
+- ✅ Standard samlify attribute handling
+
 ### IdP Configuration (`idp-app/idp.js`)
 
 ```javascript
@@ -178,11 +232,13 @@ const idp = saml.IdentityProvider({
     entityID: 'http://localhost:3000/metadata',
     privateKey: fs.readFileSync('./idp-signing.key'),
     signingCert: fs.readFileSync('./idp-signing.cert'),
-    encPrivateKey: fs.readFileSync('./idp-encrypt.key'),
-    isAssertionEncrypted: true,
+    // Encryption key only loaded when ENABLE_ENCRYPTION=true
+    ...(ENABLE_ENCRYPTION && { encPrivateKey: fs.readFileSync('./idp-encrypt.key') }),
+    requestSignatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
     nameIDFormat: ['urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress'],
-    // Custom template with user attributes
-    loginResponseTemplate: { ... }
+    isAssertionEncrypted: ENABLE_ENCRYPTION,
+    // Custom template only used when encryption is enabled
+    ...(ENABLE_ENCRYPTION && { loginResponseTemplate: { ... } })
 });
 ```
 
@@ -193,8 +249,12 @@ const sp = saml.ServiceProvider({
     entityID: 'http://localhost:4000/metadata',
     privateKey: fs.readFileSync('./sp-signing.key'),
     signingCert: fs.readFileSync('./sp-signing.cert'),
-    encPrivateKey: fs.readFileSync('./sp-encrypt.key'),
-    isAssertionEncrypted: true,
+    // Encryption keys only loaded when ENABLE_ENCRYPTION=true
+    ...(ENABLE_ENCRYPTION && {
+        encPrivateKey: fs.readFileSync('./sp-encrypt.key'),
+        encryptCert: fs.readFileSync('./sp-encrypt.cert')
+    }),
+    isAssertionEncrypted: ENABLE_ENCRYPTION,
     // Dynamic IdP metadata loading
 });
 ```
@@ -267,6 +327,7 @@ LOG_LEVEL=debug
 ### Testing Scripts
 
 - `complete-saml-test.js` - Full flow verification with detailed output
+- `test-encryption-modes.js` - Test both encrypted and non-encrypted modes
 - `debug-saml-post.js` - SAML response debugging with form data analysis
 - `decode-saml.js` - Decode and analyze SAML XML responses
 
