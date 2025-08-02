@@ -2,6 +2,12 @@ const saml = require('samlify');
 const fs = require('fs');
 const axios = require('axios');
 
+// Load environment variables (with fallback for existing setups)
+require('dotenv').config();
+const ENABLE_ENCRYPTION = process.env.ENABLE_ENCRYPTION === 'true';
+
+console.log('🔐 IdP Encryption Mode:', ENABLE_ENCRYPTION ? 'ENABLED' : 'DISABLED');
+
 // Set library configurations
 saml.setSchemaValidator({
     validate: () => true
@@ -16,9 +22,11 @@ async function createSPFromURL() {
 
         return saml.ServiceProvider({
             metadata: response.data,
-            // Disable signature verification for debugging
+            // Configure signature settings based on encryption mode
             wantAssertionsSigned: false,
-            wantResponseSigned: false
+            wantResponseSigned: false,
+            // Only set encryption expectation if encryption is enabled
+            isAssertionEncrypted: ENABLE_ENCRYPTION
         });
     } catch (error) {
         console.error('Failed to fetch SP metadata:', error.message);
@@ -27,7 +35,8 @@ async function createSPFromURL() {
         return saml.ServiceProvider({
             metadata: fs.readFileSync('./sp_metadata.xml', 'utf8'),
             wantAssertionsSigned: false,
-            wantResponseSigned: false
+            wantResponseSigned: false,
+            isAssertionEncrypted: ENABLE_ENCRYPTION
         });
     }
 }
@@ -36,15 +45,15 @@ const idp = saml.IdentityProvider({
     entityID: 'http://localhost:3000/metadata',
     privateKey: fs.readFileSync('./idp-signing.key'),
     signingCert: fs.readFileSync('./idp-signing.cert'),
-    encPrivateKey: fs.readFileSync('./idp-encrypt.key'),
+    ...(ENABLE_ENCRYPTION && { encPrivateKey: fs.readFileSync('./idp-encrypt.key') }),
     requestSignatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
     nameIDFormat: ['urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress'],
     singleSignOnService: [{
         Binding: 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect',
         Location: 'http://localhost:3000/sso'
     }],
-    isAssertionEncrypted: true,
-    // Custom template for attributes
+    isAssertionEncrypted: ENABLE_ENCRYPTION,
+    // Always use custom template for consistent attribute handling
     loginResponseTemplate: {
         context: `
         <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="{ID}" Version="2.0" IssueInstant="{IssueInstant}" Destination="{Destination}" InResponseTo="{InResponseTo}">
