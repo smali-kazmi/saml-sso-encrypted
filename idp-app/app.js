@@ -6,6 +6,13 @@ const fs = require('fs');
 const bodyParser = require('body-parser');
 const zlib = require('zlib');
 
+// Load environment variables
+require('dotenv').config();
+const ENABLE_ENCRYPTION = process.env.ENABLE_ENCRYPTION === 'true';
+
+console.log('🚀 IdP Server Configuration:');
+console.log('🔐 Encryption Mode:', ENABLE_ENCRYPTION ? 'ENABLED' : 'DISABLED');
+
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
@@ -108,8 +115,11 @@ app.get('/sso', async (req, res) => {
         console.log('Using parsed object as extractRequest');
 
         console.log('🎯 User object for SAML response:', JSON.stringify(user, null, 2));
+        console.log('🔐 Encryption mode:', ENABLE_ENCRYPTION ? 'ENABLED' : 'DISABLED');
 
-        // Create SAML response with tag replacement for attributes
+        let loginResponse;
+
+        // Always use tag replacement for consistent attribute handling
         const tagReplacement = (template) => {
             const replaceTagsByValue = (rawXML, tagValues) => {
                 return Object.keys(tagValues).reduce((xml, key) => {
@@ -138,7 +148,7 @@ app.get('/sso', async (req, res) => {
                 NameID: user.email,
                 SubjectRecipient: acsLocation,
                 Audience: spEntityID,
-                // User attribute values - these will replace the placeholders in the template
+                // User attribute values
                 email: user.email,
                 displayName: user.displayName,
                 firstName: user.firstName,
@@ -154,7 +164,7 @@ app.get('/sso', async (req, res) => {
             return { id, context };
         };
 
-        const loginResponse = await idp.createLoginResponse(freshSP, parsed, 'post', user, tagReplacement); console.log('✅ Login response created successfully');
+        loginResponse = await idp.createLoginResponse(freshSP, parsed, 'post', user, tagReplacement); console.log('✅ Login response created successfully');
         console.log('📊 Login response keys:', Object.keys(loginResponse));
         console.log('📄 Login response type:', typeof loginResponse.context);
         console.log('📏 Login response context length:', loginResponse.context?.length || 0);
